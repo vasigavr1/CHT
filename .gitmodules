@@ -1,0 +1,3 @@
+[submodule "odlib"]
+	path = odlib
+	url = git@github.com:vasigavr1/Odyssey-lib.git

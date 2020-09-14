@@ -42,19 +42,22 @@ static void cht_qp_meta_mfs(context_t *ctx)
 {
   mf_t *mfs = calloc(QP_NUM, sizeof(mf_t));
 
-  //mfs[PREP_QP_ID].recv_handler = prepare_handler;
+  mfs[PREP_QP_ID].recv_handler = cht_prepare_handler;
   mfs[PREP_QP_ID].send_helper = cht_send_preps_helper;
   mfs[PREP_QP_ID].insert_helper = cht_insert_prep_help;
+  mfs[PREP_QP_ID].recv_kvs = cht_KVS_batch_op_preps;
   //mfs[PREP_QP_ID].polling_debug = cht_debug_info_bookkeep;
 
-  //mfs[ACK_QP_ID].recv_handler = ack_handler;
 
-  //mfs[COM_QP_ID].recv_handler = cht_commit_handler;
-  //mfs[COM_QP_ID].send_helper = cht_send_commits_helper;
+  mfs[ACK_QP_ID].recv_handler = cht_ack_handler;
+  mfs[ACK_QP_ID].send_helper = cht_send_acks_helper;
+
+  mfs[COM_QP_ID].recv_handler = cht_commit_handler;
+  mfs[COM_QP_ID].send_helper = cht_send_commits_helper;
   //mfs[COMMIT_W_QP_ID].polling_debug = cht_debug_info_bookkeep;
   //
   //mfs[R_QP_ID].recv_handler = r_handler;
-  //mfs[ACK_QP_ID].send_helper = send_acks_helper;
+  //
   //mfs[R_QP_ID].recv_kvs = cht_KVS_batch_op_reads;
   //mfs[R_QP_ID].insert_helper = insert_r_rep_help;
   //mfs[R_QP_ID].polling_debug = cht_debug_info_bookkeep;
@@ -144,12 +147,13 @@ static void* set_up_cht_ctx(context_t *ctx)
 
   cht_ctx->ops = (ctx_trace_op_t *) calloc((size_t) CHT_TRACE_BATCH, sizeof(ctx_trace_op_t));
 
+  cht_ctx->buf_reads = fifo_constructor(2 * SESSIONS_PER_THREAD, sizeof(cht_buf_op_t), false, 0, 1);
+
   for (int i = 0; i < SESSIONS_PER_THREAD; i++) cht_ctx->stalled[i] = false;
   for (uint8_t m_id = 0; m_id < MACHINE_NUM; ++m_id) {
     for (uint32_t i = 0; i < CHT_W_ROB_SIZE; i++) {
       cht_w_rob_t *w_rob = get_fifo_slot(&cht_ctx->w_rob[m_id], i);
       w_rob->w_state = INVALID;
-      w_rob->version = 0;
       w_rob->m_id = m_id;
       w_rob->id = (uint16_t) i;
       if (m_id == ctx->m_id) {
@@ -158,6 +162,12 @@ static void* set_up_cht_ctx(context_t *ctx)
     }
   }
 
+  cht_ctx->ptrs_to_w = calloc(1, sizeof(cht_ptrs_to_w_t));
+  cht_ctx->ptrs_to_w->w_rob = calloc(CHT_UPDATE_BATCH, sizeof(cht_w_rob_t*));
+
+  cht_ctx->ptrs_to_prep = calloc(1, sizeof(ptrs_to_prep_t));
+  cht_ctx->ptrs_to_prep->ptr_to_ops = calloc(MAX_INCOMING_PREP, sizeof(cht_prep_t*));
+  cht_ctx->ptrs_to_prep->ptr_to_mes = calloc(MAX_INCOMING_PREP, sizeof(cht_prep_mes_t*));
 
   if (!ENABLE_CLIENTS)
     cht_ctx->trace = trace_init(ctx->t_id);

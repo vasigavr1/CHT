@@ -21,6 +21,8 @@
 #define CHT_TRACE_BATCH SESSIONS_PER_THREAD
 #define CHT_PENDING_WRITES (SESSIONS_PER_THREAD + 1)
 #define CHT_W_ROB_SIZE (CHT_PENDING_WRITES)
+#define CHT_UPDATE_BATCH (CHT_W_ROB_SIZE * MACHINE_NUM)
+#define MAX_INCOMING_PREP (CHT_W_ROB_SIZE * REM_MACH_NUM)
 
 #define CHT_PREP_MCAST_QP 0
 #define CHT_COM_MCAST_QP 1
@@ -30,7 +32,7 @@
  * ----------------KVS----------------------------
  * ----------------------------------------------*/
 #define MICA_VALUE_SIZE (VALUE_SIZE + (FIND_PADDING_CUST_ALIGN(VALUE_SIZE, 32)))
-#define MICA_OP_SIZE_  (20 + ((MICA_VALUE_SIZE)))
+#define MICA_OP_SIZE_ (32 + ((MICA_VALUE_SIZE)))
 #define MICA_OP_PADDING_SIZE  (FIND_PADDING(MICA_OP_SIZE_))
 #define MICA_OP_SIZE  (MICA_OP_SIZE_ + MICA_OP_PADDING_SIZE)
 
@@ -39,7 +41,11 @@ struct mica_op {
   uint8_t value[MICA_VALUE_SIZE];
   struct key key;
   seqlock_t seqlock;
+  uint64_t version;
+  uint8_t state;
+  uint8_t unused[3];
   uint32_t key_id; // strictly for debug
+
   uint8_t padding[MICA_OP_PADDING_SIZE];
 };
 
@@ -47,6 +53,8 @@ struct mica_op {
 /*------------------------------------------------
  * -----------------------------------------------
  * ----------------------------------------------*/
+typedef enum{CHT_V = 0, CHT_INV} key_state_t;
+
 
 typedef enum op_state {INVALID, SEMIVALID,
   VALID, SENT,
@@ -54,11 +62,11 @@ typedef enum op_state {INVALID, SEMIVALID,
 
 typedef enum {NOT_USED, LOCAL_PREP, REMOTE_WRITE} source_t;
 
-typedef struct w_rob {
-  uint64_t version;
-  uint64_t l_id; // TODO not needed
-  mica_op_t *kv_ptr;
+typedef struct cht_w_rob {
 
+  uint64_t l_id;
+  uint64_t version;
+  mica_op_t *kv_ptr;
   uint16_t sess_id;
   uint16_t id;
 
@@ -70,13 +78,32 @@ typedef struct w_rob {
 
 } cht_w_rob_t;
 
+typedef struct cht_buf_op {
+  ctx_trace_op_t op;
+  mica_op_t *kv_ptr;
+} cht_buf_op_t;
+
+typedef struct cht_ptrs_to_w {
+  cht_w_rob_t **w_rob;
+  uint16_t write_num;
+} cht_ptrs_to_w_t;
+
+typedef struct ptrs_to_prep {
+  uint16_t polled_preps;
+  cht_prep_t **ptr_to_ops;
+  cht_prep_mes_t **ptr_to_mes;
+} ptrs_to_prep_t;
+
 // A data structute that keeps track of the outstanding writes
 typedef struct cht_ctx {
   // reorder buffers
   fifo_t *w_rob;
   fifo_t *loc_w_rob; //points in the w_rob
 
-  //ptrs_to_inv_t *ptrs_to_inv;
+
+
+  cht_ptrs_to_w_t *ptrs_to_w;
+  ptrs_to_prep_t *ptrs_to_prep;
 
   trace_t *trace;
   uint32_t trace_iter;
@@ -85,7 +112,7 @@ typedef struct cht_ctx {
   ctx_trace_op_t *ops;
   //cht_resp_t *resp;
 
-  fifo_t *buf_ops;
+  fifo_t *buf_reads;
 
   uint64_t *inserted_w_id;
   uint64_t *committed_w_id;

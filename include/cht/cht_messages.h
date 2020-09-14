@@ -30,7 +30,7 @@
 
 
 typedef struct cht_prepare {
-  uint64_t g_id;
+  uint64_t version;
   mica_key_t key;
   uint8_t value[VALUE_SIZE];
 } __attribute__((__packed__)) cht_prep_t;

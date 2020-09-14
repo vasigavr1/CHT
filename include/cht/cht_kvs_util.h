@@ -147,7 +147,7 @@ static inline void cht_loc_write(context_t *ctx,
               w_rob->sess_id, w_rob->l_id,
               cht_ctx->loc_w_rob->push_ptr);
 
-  ctx_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1, false, op, LOCAL_PREP);
+  ctx_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1, false, op, LOCAL_PREP, 0);
 }
 
 

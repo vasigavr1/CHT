@@ -58,9 +58,9 @@ static void cht_qp_meta_mfs(context_t *ctx)
   //
   //mfs[R_QP_ID].recv_handler = r_handler;
   //
-  //mfs[R_QP_ID].recv_kvs = cht_KVS_batch_op_reads;
-  //mfs[R_QP_ID].insert_helper = insert_r_rep_help;
-  //mfs[R_QP_ID].polling_debug = cht_debug_info_bookkeep;
+  mfs[W_QP_ID].recv_handler = cht_insert_write_handler;
+  mfs[W_QP_ID].insert_helper = cht_insert_write_help;
+  mfs[W_QP_ID].send_helper = cht_send_writes_helper;
 
 
 
@@ -125,6 +125,15 @@ static void cht_init_qp_meta(context_t *ctx)
                      CHT_COM_MCAST_QP, 0, COMMIT_FIFO_SIZE,
                      COM_CREDITS, CTX_COM_SEND_SIZE,
                      "send commits", "recv commits");
+
+  create_per_qp_meta(&qp_meta[W_QP_ID], CHT_MAX_W_WRS,
+                     CHT_MAX_RECV_W_WRS, SEND_UNI_REQ_RECV_UNI_REQ, RECV_REQ,
+                     W_QP_ID,
+                     REM_MACH_NUM, REM_MACH_NUM, CHT_BUF_SLOTS,
+                     sizeof(cht_w_mes_ud_t), sizeof(cht_w_mes_t), false, false,
+                     0, 0, CHT_W_FIFO_SIZE,
+                     0, CHT_W_HEADER,
+                     "send writes", "recv writes");
 
 
   cht_qp_meta_mfs(ctx);

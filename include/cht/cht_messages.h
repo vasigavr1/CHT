@@ -57,4 +57,34 @@ typedef struct cht_prep_message_ud_req {
 #define COM_BUF_SLOTS RECV_COM_WRS
 #define MAX_LIDS_IN_A_COMMIT SESSIONS_PER_THREAD
 
+
+#define MAX_W_COALESCE 16
+#define CHT_MAX_W_WRS (MACHINE_NUM + (SESSIONS_PER_THREAD / MAX_W_COALESCE))
+#define CHT_MAX_RECV_W_WRS (REM_MACH_NUM * SESSIONS_PER_THREAD)
+#define CHT_BUF_SLOTS CHT_MAX_RECV_W_WRS
+#define CHT_W_HEADER 4
+
+typedef struct cht_write {
+  mica_key_t key;	/* 8B */
+  uint32_t sess_id;
+  uint8_t value[VALUE_SIZE];
+} __attribute__((__packed__)) cht_write_t;
+
+typedef struct cht_w_message {
+  uint8_t coalesce_num;
+  uint8_t opcode;
+  uint8_t m_id;
+  uint8_t unused;
+  cht_write_t write[MAX_W_COALESCE];
+} __attribute__((__packed__)) cht_w_mes_t;
+
+
+typedef struct cht_w_message_ud_req {
+  uint8_t unused[GRH_SIZE];
+  cht_w_mes_t w_mes;
+} cht_w_mes_ud_t;
+
+
+#define CHT_W_SIZE sizeof(cht_write_t)
+
 #endif //ODYSSEY_CHT_MESSAGES_H

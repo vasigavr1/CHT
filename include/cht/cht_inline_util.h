@@ -11,6 +11,28 @@
 #include "cht_kvs_util.h"
 #include "cht_debug_util.h"
 
+static inline uint8_t get_key_owner(mica_key_t key)
+{
+  return (uint8_t) (key.bkt % MACHINE_NUM);
+}
+
+static inline uint8_t get_fifo_i(context_t *ctx,
+                                 uint8_t rm_id)
+{
+  return rm_id > ctx->m_id ? (uint8_t) (rm_id - 1) : rm_id;
+}
+
+static inline bool filter_remote_writes(context_t *ctx,
+                                        ctx_trace_op_t *op)
+{
+  uint8_t rm_id = get_key_owner(op->key);
+  if (rm_id == ctx->m_id) return false;
+  else {
+    ctx_insert_mes(ctx, W_QP_ID, (uint32_t) CHT_W_SIZE, 1, false, op, NOT_USED, get_fifo_i(ctx, rm_id));
+  }
+  return true;
+}
+
 
 static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
 {
@@ -18,7 +40,7 @@ static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
   ctx_trace_op_t *ops = cht_ctx->ops;
   trace_t *trace = cht_ctx->trace;
 
-  uint16_t op_i = 0;
+  uint16_t kvs_op_i = 0, op_num = 0;
   int working_session = -1;
 
   if (all_sessions_are_stalled(ctx, cht_ctx->all_sessions_stalled,
@@ -30,9 +52,9 @@ static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
   bool passed_over_all_sessions = false;
 
   /// main loop
-  while (op_i < CHT_TRACE_BATCH && !passed_over_all_sessions) {
+  while (kvs_op_i < CHT_TRACE_BATCH && !passed_over_all_sessions) {
 
-    ctx_fill_trace_op(ctx, &trace[cht_ctx->trace_iter], &ops[op_i], working_session);
+    ctx_fill_trace_op(ctx, &trace[cht_ctx->trace_iter], &ops[kvs_op_i], working_session);
     cht_ctx->stalled[working_session] = true;
     passed_over_all_sessions =
       ctx_find_next_working_session(ctx, &working_session,
@@ -43,11 +65,14 @@ static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
       cht_ctx->trace_iter++;
       if (trace[cht_ctx->trace_iter].opcode == NOP) cht_ctx->trace_iter = 0;
     }
-    op_i++;
+
+    if (!filter_remote_writes(ctx, &ops[kvs_op_i]))
+      kvs_op_i++;
+    op_num++;
   }
   cht_ctx->last_session = (uint16_t) working_session;
-  t_stats[ctx->t_id].cache_hits_per_thread += op_i;
-  cht_KVS_batch_op_trace(ctx, op_i);
+  t_stats[ctx->t_id].cache_hits_per_thread += op_num;
+  cht_KVS_batch_op_trace(ctx, kvs_op_i);
 }
 
 ///* ---------------------------------------------------------------------------
@@ -197,6 +222,32 @@ static inline void cht_insert_prep_help(context_t *ctx, void* prep_ptr,
 }
 
 
+static inline void cht_insert_write_help(context_t *ctx, void *w_ptr,
+                                         void *source, uint32_t source_flag)
+{
+  cht_write_t *write = (cht_write_t *) w_ptr;
+  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
+  per_qp_meta_t *qp_meta = &ctx->qp_meta[W_QP_ID];
+  ctx_trace_op_t *op = (ctx_trace_op_t *) source;
+  uint8_t rm_id = get_key_owner(op->key);
+  fifo_t *send_fifo = &qp_meta->send_fifo[get_fifo_i(ctx, rm_id)];
+
+ 
+  write->key = op->key;
+  write->sess_id = op->session_id;
+  memcpy(write->value, op->value_to_write, VALUE_SIZE);
+
+  slot_meta_t *slot_meta = get_fifo_slot_meta_push(send_fifo);
+  if (slot_meta->coalesce_num == 1) {
+    slot_meta->rm_id = rm_id;
+  }
+
+  cht_w_mes_t *w_mes = (cht_w_mes_t *) get_fifo_pull_slot(send_fifo);
+  w_mes->coalesce_num = (uint8_t) slot_meta->coalesce_num;
+  
+  cht_ctx->index_to_req_array[op->session_id] = op->index_to_req_array;
+}
+
 ///* ---------------------------------------------------------------------------
 ////------------------------------SEND HELPERS -----------------------------
 ////---------------------------------------------------------------------------*/
@@ -214,6 +265,34 @@ static inline void cht_send_acks_helper(context_t *ctx)
 static inline void cht_send_commits_helper(context_t *ctx)
 {
   cht_checks_and_stats_on_bcasting_commits(ctx);
+}
+
+static inline void cht_checks_and_stats_on_sending_writes(context_t * ctx)
+{
+  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
+  per_qp_meta_t *qp_meta = &ctx->qp_meta[W_QP_ID];
+  fifo_t *send_fifo = qp_meta->send_fifo;
+  cht_w_mes_t *w_mes = (cht_w_mes_t *) get_fifo_pull_slot(send_fifo);
+  uint16_t coalesce_num = get_fifo_slot_meta_pull(send_fifo)->coalesce_num;
+  w_mes->coalesce_num = (uint8_t) coalesce_num;
+
+  if (ENABLE_ASSERTIONS) {
+    assert(qp_meta->send_fifo->net_capacity >= coalesce_num);
+    qp_meta->outstanding_messages += coalesce_num;
+  }
+  if (DEBUG_WRITES)
+    printf("Wrkr %d has %u writes \n", ctx->t_id,
+           qp_meta->send_fifo->net_capacity);
+
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[ctx->t_id].writes_sent += coalesce_num;
+    t_stats[ctx->t_id].writes_sent_mes_num++;
+  }
+}
+
+static inline void cht_send_writes_helper(context_t *ctx)
+{
+  cht_checks_and_stats_on_sending_writes(ctx);
 }
 
 ///* ---------------------------------------------------------------------------
@@ -337,6 +416,12 @@ static inline bool cht_commit_handler(context_t *ctx)
   return true;
 }
 
+
+static inline bool cht_insert_write_handler(context_t *ctx)
+{
+
+}
+
 ///* ---------------------------------------------------------------------------
 ////------------------------------ MAIN LOOP -----------------------------
 ////---------------------------------------------------------------------------*/
@@ -364,6 +449,10 @@ static inline void cht_main_loop(context_t *ctx)
     ctx_send_broadcasts(ctx, COM_QP_ID);
 
     ctx_poll_incoming_messages(ctx, COM_QP_ID);
+    
+    ctx_send_unicasts(ctx, W_QP_ID);
+
+    ctx_poll_incoming_messages(ctx, W_QP_ID);
 
   }
 }

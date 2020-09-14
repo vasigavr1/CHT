@@ -13,10 +13,11 @@
 
 
 
-#define QP_NUM 3
+#define QP_NUM 4
 #define PREP_QP_ID 0
 #define ACK_QP_ID 1
 #define COM_QP_ID 2
+#define W_QP_ID 3
 
 #define CHT_TRACE_BATCH SESSIONS_PER_THREAD
 #define CHT_PENDING_WRITES (SESSIONS_PER_THREAD + 1)
@@ -27,6 +28,7 @@
 #define CHT_PREP_MCAST_QP 0
 #define CHT_COM_MCAST_QP 1
 #define COMMIT_FIFO_SIZE 1
+#define CHT_W_FIFO_SIZE CHT_PENDING_WRITES
 
 /*------------------------------------------------
  * ----------------KVS----------------------------

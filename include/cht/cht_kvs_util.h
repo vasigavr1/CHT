@@ -48,21 +48,26 @@ static inline void init_w_rob_on_rem_prep(context_t *ctx,
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
   cht_w_rob_t *w_rob = (cht_w_rob_t *)
     get_fifo_push_slot(&cht_ctx->w_rob[prep_mes->m_id]);
-  if (DEBUG_PREPARES)
-    my_printf(cyan, "W_rob %u for prep from %u with l_id %lu -->%lu, inserted w_id = %u\n",
+  if (DEBUG_WRITES)
+    my_printf(cyan, "Remote W_rob %u for prep from %u with l_id %lu -->%lu, inserted w_id = %u,"
+                "owner %u/%u\n",
               w_rob->id,  prep_mes->m_id, prep_mes->l_id,
               prep_mes->l_id + prep_mes->coalesce_num,
-              cht_ctx->inserted_w_id[prep_mes->m_id]);
+              cht_ctx->inserted_w_id[prep_mes->m_id], prep->m_id, prep->sess_id);
   if (ENABLE_ASSERTIONS) {
     assert(w_rob->w_state == INVALID);
     w_rob->l_id = cht_ctx->inserted_w_id[prep_mes->m_id];
+    assert(w_rob->coordin_m_id == prep_mes->m_id);
+    if (prep->m_id == ctx->m_id) assert(cht_ctx->stalled[prep->sess_id]);
   }
   w_rob->w_state = VALID;
   cht_ctx->inserted_w_id[prep_mes->m_id]++;
   // w_rob capacity is already incremented when polling
   // to achieve back pressure at polling
   w_rob->version = prep->version;
-  w_rob->m_id = prep_mes->m_id;
+
+  w_rob->owner_m_id = prep->m_id;
+  w_rob->sess_id = prep->sess_id;
   w_rob->kv_ptr = kv_ptr;
   fifo_incr_push_ptr(&cht_ctx->w_rob[prep_mes->m_id]);
 }
@@ -119,10 +124,16 @@ static inline void cht_loc_read(context_t *ctx,
 }
 
 
-static inline void cht_loc_write(context_t *ctx, 
-                                 mica_op_t *kv_ptr, 
-                                 ctx_trace_op_t *op)
+static inline void cht_loc_or_rem_write(context_t *ctx,
+                                        mica_op_t *kv_ptr,
+                                        void *source,
+                                        source_t source_flag,
+                                        uint8_t m_id)
 {
+  uint8_t *value_ptr = source_flag == LOCAL_PREP ?
+                       ((ctx_trace_op_t *) source)->value_to_write :
+                       ((cht_write_t *) source)->value;
+
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
   cht_w_rob_t *w_rob = (cht_w_rob_t *)
     get_fifo_push_slot(cht_ctx->loc_w_rob);
@@ -133,21 +144,18 @@ static inline void cht_loc_write(context_t *ctx,
     kv_ptr->state = CHT_INV;
     kv_ptr->version++;
     w_rob->version = kv_ptr->version;
-    memcpy(kv_ptr->value, op->value_to_write, VALUE_SIZE);
+    memcpy(kv_ptr->value, value_ptr, VALUE_SIZE);
   }
   unlock_seqlock(&kv_ptr->seqlock);
 
+  w_rob->owner_m_id = m_id;
   w_rob->kv_ptr = kv_ptr;
-  w_rob->sess_id = op->session_id;
   w_rob->w_state = SEMIVALID;
-  if (ENABLE_ASSERTIONS)
-    assert(cht_ctx->stalled[w_rob->sess_id]);
-  if (DEBUG_PREPARES)
-    my_printf(cyan, "W_rob insert sess %u write %lu, w_rob_i %u\n",
-              w_rob->sess_id, w_rob->l_id,
-              cht_ctx->loc_w_rob->push_ptr);
 
-  ctx_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1, false, op, LOCAL_PREP, 0);
+  //if (DEBUG_PREPARES)
+
+
+  ctx_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1, false, source, source_flag, 0);
 }
 
 
@@ -191,7 +199,7 @@ static inline void cht_KVS_batch_op_trace(context_t *ctx, uint16_t op_num)
     KVS_check_key(kv_ptr[op_i], op[op_i].key, op_i);
 
     if (op[op_i].opcode == KVS_OP_PUT) {
-      cht_loc_write(ctx, kv_ptr[op_i], &op[op_i]);
+      cht_loc_or_rem_write(ctx, kv_ptr[op_i], &op[op_i], LOCAL_PREP, ctx->m_id);
     }
     else {
       check_opcode_is_read(op, op_i);
@@ -206,14 +214,14 @@ static inline void cht_KVS_batch_op_trace(context_t *ctx, uint16_t op_num)
 static inline void cht_KVS_batch_op_preps(context_t *ctx)
 {
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
-  ptrs_to_prep_t *ptrs_to_prep = cht_ctx->ptrs_to_prep;
-  cht_prep_mes_t **prep_mes = cht_ctx->ptrs_to_prep->ptr_to_mes;
-  cht_prep_t **invs = ptrs_to_prep->ptr_to_ops;
-  uint16_t op_num = ptrs_to_prep->polled_preps;
+  cht_ptrs_to_op_t *ptrs_to_prep = cht_ctx->ptrs_to_ops;
+  cht_prep_mes_t **prep_mes = (cht_prep_mes_t **) cht_ctx->ptrs_to_ops->ptr_to_mes;
+  cht_prep_t **preps = (cht_prep_t **) ptrs_to_prep->ops;
+  uint16_t op_num = ptrs_to_prep->op_num;
 
   uint16_t op_i;
   if (ENABLE_ASSERTIONS) {
-    assert(invs != NULL);
+    assert(preps != NULL);
     assert(op_num > 0 && op_num <= MAX_INCOMING_PREP);
   }
 
@@ -223,14 +231,48 @@ static inline void cht_KVS_batch_op_preps(context_t *ctx)
   mica_op_t *kv_ptr[MAX_INCOMING_PREP];	/* Ptr to KV item in log */
 
   for(op_i = 0; op_i < op_num; op_i++) {
-    KVS_locate_one_bucket(op_i, bkt, &invs[op_i]->key, bkt_ptr, tag, kv_ptr, KVS);
+    KVS_locate_one_bucket(op_i, bkt, &preps[op_i]->key, bkt_ptr, tag, kv_ptr, KVS);
   }
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
   for(op_i = 0; op_i < op_num; op_i++) {
-    KVS_check_key(kv_ptr[op_i], invs[op_i]->key, op_i);
-    cht_rem_prep(ctx, kv_ptr[op_i], prep_mes[op_i], invs[op_i]);
+    KVS_check_key(kv_ptr[op_i], preps[op_i]->key, op_i);
+    cht_rem_prep(ctx, kv_ptr[op_i], prep_mes[op_i], preps[op_i]);
   }
 }
+
+
+static inline void cht_KVS_batch_op_writes(context_t *ctx)
+{
+  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
+  cht_ptrs_to_op_t *ptrs_to_writes = cht_ctx->ptrs_to_ops;
+  cht_w_mes_t **w_mes = (cht_w_mes_t **) cht_ctx->ptrs_to_ops->ptr_to_mes;
+  cht_write_t **writes = (cht_write_t **) ptrs_to_writes->ops;
+  uint16_t op_num = ptrs_to_writes->op_num;
+
+  uint16_t op_i;
+  if (ENABLE_ASSERTIONS) {
+    assert(writes != NULL);
+    assert(op_num > 0 && op_num <= MAX_INCOMING_PREP);
+  }
+
+  unsigned int bkt[MAX_INCOMING_PREP];
+  struct mica_bkt *bkt_ptr[MAX_INCOMING_PREP];
+  unsigned int tag[MAX_INCOMING_PREP];
+  mica_op_t *kv_ptr[MAX_INCOMING_PREP];	/* Ptr to KV item in log */
+
+  for(op_i = 0; op_i < op_num; op_i++) {
+    KVS_locate_one_bucket(op_i, bkt, &writes[op_i]->key, bkt_ptr, tag, kv_ptr, KVS);
+  }
+  KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
+
+  for(op_i = 0; op_i < op_num; op_i++) {
+    KVS_check_key(kv_ptr[op_i], writes[op_i]->key, op_i);
+    cht_loc_or_rem_write(ctx, kv_ptr[op_i], (void *) writes[op_i],
+                         REMOTE_WRITE, w_mes[op_i]->m_id);
+  }
+
+}
+
 
 #endif //ODYSSEY_CHT_KVS_UTIL_H

@@ -89,17 +89,24 @@ static inline void cht_check_prepare_and_print(context_t *ctx,
   }
 }
 
-static inline void check_w_rob_when_handling_a_prep(ptrs_to_prep_t *ptrs_to_prep,
+static inline void check_w_rob_when_handling_a_prep(context_t *ctx,
+                                                    cht_ptrs_to_op_t *ptrs_to_prep,
                                                     fifo_t *w_rob_fifo,
                                                     cht_prep_mes_t *prep_mes,
                                                     uint8_t prep_i)
 {
   if (ENABLE_ASSERTIONS) {
+    cht_prep_t *prep= &prep_mes->prepare[prep_i];
     cht_w_rob_t *w_rob = (cht_w_rob_t *)
       get_fifo_push_relative_slot(w_rob_fifo, prep_i);
     assert(w_rob->w_state == INVALID);
     w_rob->l_id = prep_mes->l_id + prep_i;
-    assert(ptrs_to_prep->polled_preps < MAX_INCOMING_PREP);
+    assert(ptrs_to_prep->op_num < MAX_INCOMING_PREP);
+
+    cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
+
+    if (prep->m_id == ctx->m_id)
+      assert(cht_ctx->stalled[prep->sess_id]);
   }
 }
 
@@ -204,7 +211,7 @@ static inline void cht_check_each_commit(context_t *ctx,
     assert(w_rob->w_state == VALID);
     assert(w_rob->l_id == l_id + com_i);
     assert(l_id + com_i == cht_ctx->committed_w_id[com->m_id]);
-    assert(w_rob->m_id == com->m_id);
+    assert(w_rob->coordin_m_id == com->m_id);
   }
 }
 

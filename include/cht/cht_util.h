@@ -58,9 +58,10 @@ static void cht_qp_meta_mfs(context_t *ctx)
   //
   //mfs[R_QP_ID].recv_handler = r_handler;
   //
-  mfs[W_QP_ID].recv_handler = cht_insert_write_handler;
+  mfs[W_QP_ID].recv_handler = cht_write_handler;
   mfs[W_QP_ID].insert_helper = cht_insert_write_help;
   mfs[W_QP_ID].send_helper = cht_send_writes_helper;
+  mfs[W_QP_ID].recv_kvs = cht_KVS_batch_op_writes;
 
 
 
@@ -92,8 +93,16 @@ static void cht_init_send_fifos(context_t *ctx)
     preps[i].opcode = KVS_OP_PUT;
     preps[i].m_id = ctx->m_id;
     for (uint16_t j = 0; j < PREP_COALESCE; j++) {
-      //preps[i].prepare[j].opcode = KVS_OP_PUT;
-      // preps[i].prepare[j].val_len = VALUE_SIZE >> SHIFT_BITS;
+    }
+  }
+
+  for (int fifo_i = 0; fifo_i < ctx->qp_meta[W_QP_ID].send_fifo_num; ++fifo_i) {
+    cht_w_mes_t *w_mes = (cht_w_mes_t *) ctx->qp_meta[W_QP_ID].send_fifo[fifo_i].fifo;
+    for (int i = 0; i < CHT_W_FIFO_SIZE; i++) {
+      w_mes[i].opcode = KVS_OP_PUT;
+      w_mes[i].m_id = ctx->m_id;
+      for (uint16_t j = 0; j < CHT_W_COALESCE; j++) {
+      }
     }
   }
 }
@@ -163,20 +172,14 @@ static void* set_up_cht_ctx(context_t *ctx)
     for (uint32_t i = 0; i < CHT_W_ROB_SIZE; i++) {
       cht_w_rob_t *w_rob = get_fifo_slot(&cht_ctx->w_rob[m_id], i);
       w_rob->w_state = INVALID;
-      w_rob->m_id = m_id;
+      w_rob->coordin_m_id = m_id;
       w_rob->id = (uint16_t) i;
-      if (m_id == ctx->m_id) {
-        w_rob->inv_applied = true;
-      }
     }
   }
 
-  cht_ctx->ptrs_to_w = calloc(1, sizeof(cht_ptrs_to_w_t));
-  cht_ctx->ptrs_to_w->w_rob = calloc(CHT_UPDATE_BATCH, sizeof(cht_w_rob_t*));
-
-  cht_ctx->ptrs_to_prep = calloc(1, sizeof(ptrs_to_prep_t));
-  cht_ctx->ptrs_to_prep->ptr_to_ops = calloc(MAX_INCOMING_PREP, sizeof(cht_prep_t*));
-  cht_ctx->ptrs_to_prep->ptr_to_mes = calloc(MAX_INCOMING_PREP, sizeof(cht_prep_mes_t*));
+  cht_ctx->ptrs_to_ops = calloc(1, sizeof(cht_ptrs_to_op_t));
+  cht_ctx->ptrs_to_ops->ops = calloc(MAX_INCOMING_PREP, sizeof(void*));
+  cht_ctx->ptrs_to_ops->ptr_to_mes = calloc(MAX_INCOMING_PREP, sizeof(void*));
 
   if (!ENABLE_CLIENTS)
     cht_ctx->trace = trace_init(ctx->t_id);

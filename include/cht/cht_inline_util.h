@@ -25,12 +25,25 @@ static inline uint8_t get_fifo_i(context_t *ctx,
 static inline bool filter_remote_writes(context_t *ctx,
                                         ctx_trace_op_t *op)
 {
-  uint8_t rm_id = get_key_owner(op->key);
-  if (rm_id == ctx->m_id) return false;
-  else {
-    ctx_insert_mes(ctx, W_QP_ID, (uint32_t) CHT_W_SIZE, 1, false, op, NOT_USED, get_fifo_i(ctx, rm_id));
+  if (ENABLE_MULTIPLE_LEADERS) {
+    if (DISABLE_WRITE_STEERING) return false;
+
+    uint8_t rm_id = get_key_owner(op->key);
+    if (rm_id == ctx->m_id) return false;
+    else {
+      ctx_insert_mes(ctx, W_QP_ID, (uint32_t) CHT_W_SIZE, 1, false, op, NOT_USED, get_fifo_i(ctx, rm_id));
+    }
+    return true;
   }
-  return true;
+  else {
+    if (ctx->m_id == CHT_LDR_MACHINE)
+      return false;
+    else {
+      ctx_insert_mes(ctx, W_QP_ID, (uint32_t) CHT_W_SIZE, 1, false, op, NOT_USED, get_fifo_i(ctx, CHT_LDR_MACHINE));
+      return true;
+    }
+
+  }
 }
 
 
@@ -72,7 +85,7 @@ static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
   }
   cht_ctx->last_session = (uint16_t) working_session;
   t_stats[ctx->t_id].cache_hits_per_thread += op_num;
-  cht_KVS_batch_op_trace(ctx, kvs_op_i);
+  if (kvs_op_i > 0) cht_KVS_batch_op_trace(ctx, kvs_op_i);
 }
 
 ///* ---------------------------------------------------------------------------
@@ -82,10 +95,10 @@ static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
 static inline void cht_apply_writes(context_t *ctx)
 {
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
-  uint16_t op_num = cht_ctx->ptrs_to_w->write_num;
+  uint16_t op_num = cht_ctx->ptrs_to_ops->op_num;
 
   for (int w_i = 0; w_i < op_num; ++w_i) {
-    cht_w_rob_t *w_rob = cht_ctx->ptrs_to_w->w_rob[w_i];
+    cht_w_rob_t *w_rob = (cht_w_rob_t *) cht_ctx->ptrs_to_ops->ops[w_i];
     if (ENABLE_ASSERTIONS) {
       assert(w_rob->version > 0);
       assert(w_rob != NULL);
@@ -96,8 +109,8 @@ static inline void cht_apply_writes(context_t *ctx)
       //assert(kv_ptr->m_id == w_rob->m_id);
       if (ENABLE_ASSERTIONS) assert(kv_ptr->version > 0);
       if (kv_ptr->version == w_rob->version) {
-        //if (ENABLE_ASSERTIONS)
-         // assert(kv_ptr->state == CHT_INV);
+        if (ENABLE_ASSERTIONS)
+          assert(kv_ptr->state == CHT_INV);
         kv_ptr->state = CHT_V;
       }
     }
@@ -112,11 +125,20 @@ static inline void cht_complete_local_write(context_t * ctx,
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
   uint16_t sess_id = w_rob->sess_id;
   if (ENABLE_ASSERTIONS) {
-    assert(w_rob->acks_seen == REM_MACH_NUM);
     assert(sess_id < SESSIONS_PER_THREAD);
-    assert(cht_ctx->stalled[sess_id]);
+    if (!cht_ctx->stalled[sess_id]) {
+      if (DEBUG_WRITES)
+        my_printf(red, "Session not stalled: owner %u/%u \n",
+                  w_rob->owner_m_id, w_rob->sess_id);
+      assert(false);
+    }
+    else {
+      if (DEBUG_WRITES)
+        my_printf(green, "Session is stalled: owner %u/%u \n",
+                  w_rob->owner_m_id, w_rob->sess_id);
+    }
   }
-  w_rob->acks_seen = 0;
+  cht_ctx->all_sessions_stalled = false;
   signal_completion_to_client(sess_id,
                               cht_ctx->index_to_req_array[sess_id],
                               ctx->t_id);
@@ -127,22 +149,32 @@ static inline void cht_commit_writes(context_t *ctx)
 {
   uint16_t write_num = 0, local_op_i = 0;
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
-  cht_w_rob_t **ptrs_to_w_rob = cht_ctx->ptrs_to_w->w_rob;
+  cht_w_rob_t **ptrs_to_w_rob = (cht_w_rob_t **) cht_ctx->ptrs_to_ops->ops;
   for (int m_i = 0; m_i < MACHINE_NUM; ++m_i) {
     cht_w_rob_t *w_rob = (cht_w_rob_t *) get_fifo_pull_slot(&cht_ctx->w_rob[m_i]);
     while (w_rob->w_state == READY) {
 
       w_rob->w_state = INVALID;
-      if (ENABLE_ASSERTIONS)
+      if (ENABLE_ASSERTIONS) {
         assert(write_num < CHT_UPDATE_BATCH);
+        assert(w_rob->coordin_m_id == m_i);
+      }
       ptrs_to_w_rob[write_num] = w_rob;
+      __builtin_prefetch(&w_rob->kv_ptr->seqlock, 0, 0);
       //my_printf(green, "Commit sess %u write %lu, version: %lu \n",
       //          w_rob->sess_id, cht_ctx->committed_w_id[m_i] + write_num, w_rob->version);
 
       if (m_i == ctx->m_id) {
-        cht_complete_local_write(ctx, w_rob);
+        assert(w_rob->acks_seen == REM_MACH_NUM);
+        w_rob->acks_seen = 0;
         local_op_i++;
       }
+
+      if (w_rob->owner_m_id == ctx->m_id) {
+        cht_complete_local_write(ctx, w_rob);
+      }
+
+
       fifo_incr_pull_ptr(&cht_ctx->w_rob[m_i]);
       fifo_decrem_capacity(&cht_ctx->w_rob[m_i]);
       w_rob = (cht_w_rob_t *) get_fifo_pull_slot(&cht_ctx->w_rob[m_i]);
@@ -151,10 +183,9 @@ static inline void cht_commit_writes(context_t *ctx)
   }
 
   if (write_num > 0) {
-    cht_ctx->ptrs_to_w->write_num = write_num;
+    cht_ctx->ptrs_to_ops->op_num = write_num;
     cht_apply_writes(ctx);
     if (local_op_i > 0) {
-      cht_ctx->all_sessions_stalled = false;
       ctx_insert_commit(ctx, COM_QP_ID, local_op_i, cht_ctx->committed_w_id[ctx->m_id]);
       cht_ctx->committed_w_id[ctx->m_id] += local_op_i;
     }
@@ -165,60 +196,88 @@ static inline void cht_commit_writes(context_t *ctx)
 ////------------------------------INSERT HELPERS -----------------------------
 ////---------------------------------------------------------------------------*/
 
+
+static inline void cht_fill_w_rob(context_t *ctx,
+                                  cht_prep_t *prep,
+                                  cht_w_rob_t *w_rob)
+{
+  if (ENABLE_ASSERTIONS) {
+    assert(w_rob->w_state == SEMIVALID);
+    assert(w_rob->acks_seen == 0);
+  }
+  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
+  w_rob->w_state = VALID;
+  w_rob->sess_id = prep->sess_id;
+  w_rob->l_id = cht_ctx->inserted_w_id[w_rob->coordin_m_id];
+
+  if (DEBUG_WRITES)
+    my_printf(cyan, "W_rob insert sess %u write %lu, w_rob_i %u\n",
+              w_rob->sess_id, w_rob->l_id,
+              cht_ctx->loc_w_rob->push_ptr);
+
+}
+
+static inline void cht_fill_prep_and_w_rob(context_t *ctx,
+                                           cht_prep_t *prep, void *source,
+                                           cht_w_rob_t *w_rob,
+                                           source_t source_flag)
+{
+  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
+  prep->version = w_rob->version;
+  prep->m_id = w_rob->owner_m_id;
+  ctx_trace_op_t *op = (ctx_trace_op_t *) source;
+  cht_write_t *write = (cht_write_t *) source;
+  switch (source_flag) {
+    case NOT_USED:break;
+    case LOCAL_PREP:
+      if (ENABLE_ASSERTIONS) {
+        assert (prep->m_id == ctx->m_id);
+        assert(cht_ctx->stalled[op->session_id]);
+      }
+      prep->key = op->key;
+      memcpy(prep->value, op->value_to_write, (size_t) VALUE_SIZE);
+      prep->sess_id = op->session_id;
+
+      cht_ctx->index_to_req_array[op->session_id] = op->index_to_req_array;
+      break;
+    case REMOTE_WRITE:
+      if (ENABLE_ASSERTIONS) assert (prep->m_id != ctx->m_id);
+      prep->key = write->key;
+      memcpy(prep->value, write->value, (size_t) VALUE_SIZE);
+      prep->sess_id = write->sess_id;
+      break;
+  }
+  cht_fill_w_rob(ctx, prep, w_rob);
+}
+
+
+
+
 static inline void cht_insert_prep_help(context_t *ctx, void* prep_ptr,
                                         void *source, uint32_t source_flag)
 {
   per_qp_meta_t *qp_meta = &ctx->qp_meta[PREP_QP_ID];
   fifo_t *send_fifo = qp_meta->send_fifo;
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
-
-  uint16_t sess_id; uint8_t source_m_id;
   cht_prep_t *prep = (cht_prep_t *) prep_ptr;
-
 
   fifo_t *working_fifo = cht_ctx->loc_w_rob;
   cht_w_rob_t *w_rob = (cht_w_rob_t *) get_fifo_push_slot(working_fifo);
 
+  cht_fill_prep_and_w_rob(ctx, prep, source, w_rob, (source_t) source_flag);
 
-  prep->version = w_rob->version;
-  if (source_flag == LOCAL_PREP) {
-    source_m_id = ctx->m_id; 
-    ctx_trace_op_t *op = (ctx_trace_op_t *) source;
-    memcpy(prep->value, op->value_to_write, VALUE_SIZE);
-    prep->key = op->key;
-
-    cht_ctx->index_to_req_array[op->session_id] = op->index_to_req_array;
-    sess_id = op->session_id;
-    if (ENABLE_ASSERTIONS) 
-      assert(w_rob->w_state == SEMIVALID);
-  }
-  else {
-    assert(source_flag == REMOTE_WRITE);
-    source_m_id = 0;// TODO
-    sess_id = 0;// TODO
-    if (ENABLE_ASSERTIONS) 
-      assert(w_rob->w_state == INVALID);
-  }
-
-  w_rob->w_state = VALID;
-  w_rob->sess_id = sess_id;
-  w_rob->l_id = cht_ctx->inserted_w_id[source_m_id];
-  w_rob->acks_seen = 0;
-
-  //check_w_rob_in_insert_help(ctx, op, w_rob);
-  //fill_prep(prep, op, w_rob);
   slot_meta_t *slot_meta = get_fifo_slot_meta_push(send_fifo);
   cht_prep_mes_t *prep_mes = (cht_prep_mes_t *) get_fifo_push_slot(send_fifo);
   prep_mes->coalesce_num = (uint8_t) slot_meta->coalesce_num;
   // If it's the first message give it an lid
   if (slot_meta->coalesce_num == 1) {
-    prep_mes->l_id = cht_ctx->inserted_w_id[source_m_id];
+    prep_mes->l_id = cht_ctx->inserted_w_id[w_rob->coordin_m_id];
     fifo_set_push_backward_ptr(send_fifo, working_fifo->push_ptr);
   }
   // Bookkeeping
   fifo_increm_capacity(working_fifo);
   fifo_incr_push_ptr(working_fifo);
-  cht_ctx->inserted_w_id[source_m_id]++;
+  cht_ctx->inserted_w_id[w_rob->coordin_m_id]++;
 }
 
 
@@ -231,6 +290,10 @@ static inline void cht_insert_write_help(context_t *ctx, void *w_ptr,
   ctx_trace_op_t *op = (ctx_trace_op_t *) source;
   uint8_t rm_id = get_key_owner(op->key);
   fifo_t *send_fifo = &qp_meta->send_fifo[get_fifo_i(ctx, rm_id)];
+
+  if (DEBUG_WRITES)
+    my_printf(yellow, "Inserting write: owner %u/%u, to rm: %u in fifo %u \n",
+              ctx->m_id, op->session_id, rm_id, get_fifo_i(ctx, rm_id));
 
  
   write->key = op->key;
@@ -255,6 +318,11 @@ static inline void cht_insert_write_help(context_t *ctx, void *w_ptr,
 static inline void cht_send_preps_helper(context_t *ctx)
 {
   cht_checks_and_stats_on_bcasting_preps(ctx);
+  //printf("Before: Write posted receives %u \n",
+  // ctx->qp_meta[W_QP_ID].recv_info->posted_recvs);
+  ctx_refill_recvs(ctx, W_QP_ID);
+  //printf("After: Write posted receives %u \n",
+  // ctx->qp_meta[W_QP_ID].recv_info->posted_recvs);
 }
 
 static inline void cht_send_acks_helper(context_t *ctx)
@@ -271,18 +339,26 @@ static inline void cht_checks_and_stats_on_sending_writes(context_t * ctx)
 {
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
   per_qp_meta_t *qp_meta = &ctx->qp_meta[W_QP_ID];
-  fifo_t *send_fifo = qp_meta->send_fifo;
+  uint64_t fifo_i = ctx->ctx_tmp->counter;
+  fifo_t *send_fifo = &qp_meta->send_fifo[fifo_i];
   cht_w_mes_t *w_mes = (cht_w_mes_t *) get_fifo_pull_slot(send_fifo);
   uint16_t coalesce_num = get_fifo_slot_meta_pull(send_fifo)->coalesce_num;
   w_mes->coalesce_num = (uint8_t) coalesce_num;
 
   if (ENABLE_ASSERTIONS) {
-    assert(qp_meta->send_fifo->net_capacity >= coalesce_num);
+    assert(send_fifo->net_capacity >= coalesce_num);
     qp_meta->outstanding_messages += coalesce_num;
   }
-  if (DEBUG_WRITES)
-    printf("Wrkr %d has %u writes \n", ctx->t_id,
-           qp_meta->send_fifo->net_capacity);
+  if (DEBUG_WRITES) {
+    printf("Wrkr %d sends out a w_mes with %u writes to machine %u \n", ctx->t_id,
+           w_mes->coalesce_num, get_fifo_slot_meta_pull(send_fifo)->rm_id);
+    for (int w_i = 0; w_i < w_mes->coalesce_num; ++w_i) {
+      cht_write_t *write = &w_mes->write[w_i];
+      my_printf(yellow, "Write %u/%u owner %u/%u\n",
+                w_i, w_mes->coalesce_num, w_mes->m_id, write->sess_id);
+    }
+
+  }
 
   if (ENABLE_STAT_COUNTING) {
     t_stats[ctx->t_id].writes_sent += coalesce_num;
@@ -312,7 +388,7 @@ static inline bool cht_prepare_handler(context_t *ctx)
 
   fifo_t *w_rob_fifo = &cht_ctx->w_rob[prep_mes->m_id];
   bool preps_fit_in_w_rob =
-    w_rob_fifo->capacity + coalesce_num <= w_rob_fifo->max_size;
+    w_rob_fifo->capacity + coalesce_num <= SESSIONS_PER_THREAD; //w_rob_fifo->max_size;
 
   if (!preps_fit_in_w_rob) return false;
   fifo_increase_capacity(w_rob_fifo, coalesce_num);
@@ -321,18 +397,18 @@ static inline bool cht_prepare_handler(context_t *ctx)
 
   ctx_ack_insert(ctx, ACK_QP_ID, coalesce_num,  prep_mes->l_id, prep_mes->m_id);
 
-  ptrs_to_prep_t *ptrs_to_prep = cht_ctx->ptrs_to_prep;
-  if (qp_meta->polled_messages == 0) ptrs_to_prep->polled_preps = 0;
+  cht_ptrs_to_op_t *ptrs_to_prep = cht_ctx->ptrs_to_ops;
+  if (qp_meta->polled_messages == 0) ptrs_to_prep->op_num = 0;
   
   for (uint8_t prep_i = 0; prep_i < coalesce_num; prep_i++) {
-    check_w_rob_when_handling_a_prep(ptrs_to_prep,
+    check_w_rob_when_handling_a_prep(ctx, ptrs_to_prep,
                                      w_rob_fifo,
                                      prep_mes, prep_i);
 
     cht_check_prepare_and_print(ctx, prep_mes, prep_i);
-    ptrs_to_prep->ptr_to_ops[ptrs_to_prep->polled_preps] = &prep_mes->prepare[prep_i];
-    ptrs_to_prep->ptr_to_mes[ptrs_to_prep->polled_preps] = prep_mes;
-    ptrs_to_prep->polled_preps++;
+    ptrs_to_prep->ops[ptrs_to_prep->op_num] = &prep_mes->prepare[prep_i];
+    ptrs_to_prep->ptr_to_mes[ptrs_to_prep->op_num] = prep_mes;
+    ptrs_to_prep->op_num++;
   }
 
   if (ENABLE_ASSERTIONS) prep_mes->opcode = 0;
@@ -417,9 +493,42 @@ static inline bool cht_commit_handler(context_t *ctx)
 }
 
 
-static inline bool cht_insert_write_handler(context_t *ctx)
+static inline bool cht_write_handler(context_t *ctx)
 {
+  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
+  if (ENABLE_ASSERTIONS) assert(cht_ctx->w_rob->capacity < CHT_PENDING_WRITES);
+  per_qp_meta_t *qp_meta = &ctx->qp_meta[W_QP_ID];
+  fifo_t *recv_fifo = qp_meta->recv_fifo;
+  volatile cht_w_mes_ud_t *incoming_ws = (volatile cht_w_mes_ud_t *) qp_meta->recv_fifo->fifo;
+  cht_w_mes_t *w_mes = (cht_w_mes_t *) &incoming_ws[recv_fifo->pull_ptr].w_mes;
+  if (DEBUG_WRITES) printf("Wrkr %u sees a write Opcode %d at offset %d  \n",
+                           ctx->t_id, w_mes->opcode, recv_fifo->pull_ptr);
 
+  uint8_t w_num = w_mes->coalesce_num;
+  if (cht_ctx->w_rob->capacity + w_num > CHT_PENDING_WRITES) {
+    return false;
+  }
+
+  cht_ptrs_to_op_t *ptrs_to_prep = cht_ctx->ptrs_to_ops;
+  if (qp_meta->polled_messages == 0) ptrs_to_prep->op_num = 0;
+
+  for (uint16_t w_i = 0; w_i < w_num; w_i++) {
+
+    if (DEBUG_WRITES)
+      my_printf(green, "Write %u/%u owner %u/%u\n",
+      w_i, w_num, w_mes->m_id, w_mes->write[w_i].sess_id);
+    ptrs_to_prep->ops[ptrs_to_prep->op_num] = &w_mes->write[w_i];
+    ptrs_to_prep->ptr_to_mes[ptrs_to_prep->op_num] = w_mes;
+    ptrs_to_prep->op_num++;
+
+    //ctx_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1,
+    //               false, (void *) write, REMOTE_WRITE, 0);
+  }
+  if (ENABLE_STAT_COUNTING) {
+    t_stats[ctx->t_id].received_writes += w_num;
+    t_stats[ctx->t_id].received_writes_mes_num++;
+  }
+  return true;
 }
 
 ///* ---------------------------------------------------------------------------

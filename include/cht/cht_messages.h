@@ -21,7 +21,7 @@
 
 #define PREP_MES_HEADER 12 // opcode(1), coalesce_num(1) l_id (8)
 //#define EFFECTIVE_MAX_PREP_SIZE (MAX_PREP_SIZE - PREP_MES_HEADER)
-#define PREP_SIZE (16 + VALUE_SIZE)
+#define PREP_SIZE (20 + VALUE_SIZE)
 //#define PREP_COALESCE (EFFECTIVE_MAX_PREP_SIZE / PREP_SIZE)
 #define PREP_SEND_SIZE (PREP_MES_HEADER + (PREP_COALESCE * PREP_SIZE))
 #define PREP_RECV_SIZE (GRH_SIZE + PREP_SEND_SIZE)
@@ -32,6 +32,9 @@
 typedef struct cht_prepare {
   uint64_t version;
   mica_key_t key;
+  uint8_t m_id;
+  uint8_t unused;
+  uint16_t sess_id;
   uint8_t value[VALUE_SIZE];
 } __attribute__((__packed__)) cht_prep_t;
 
@@ -58,15 +61,15 @@ typedef struct cht_prep_message_ud_req {
 #define MAX_LIDS_IN_A_COMMIT SESSIONS_PER_THREAD
 
 
-#define MAX_W_COALESCE 16
-#define CHT_MAX_W_WRS (MACHINE_NUM + (SESSIONS_PER_THREAD / MAX_W_COALESCE))
-#define CHT_MAX_RECV_W_WRS (REM_MACH_NUM * SESSIONS_PER_THREAD)
-#define CHT_BUF_SLOTS CHT_MAX_RECV_W_WRS
+#define CHT_W_COALESCE 5
+#define CHT_MAX_W_WRS (25 + MACHINE_NUM + (SESSIONS_PER_THREAD / CHT_W_COALESCE))
+#define CHT_MAX_RECV_W_WRS (5 * REM_MACH_NUM * SESSIONS_PER_THREAD)
+#define CHT_BUF_SLOTS  CHT_MAX_RECV_W_WRS
 #define CHT_W_HEADER 4
 
 typedef struct cht_write {
   mica_key_t key;	/* 8B */
-  uint32_t sess_id;
+  uint16_t sess_id;
   uint8_t value[VALUE_SIZE];
 } __attribute__((__packed__)) cht_write_t;
 
@@ -75,7 +78,7 @@ typedef struct cht_w_message {
   uint8_t opcode;
   uint8_t m_id;
   uint8_t unused;
-  cht_write_t write[MAX_W_COALESCE];
+  cht_write_t write[CHT_W_COALESCE];
 } __attribute__((__packed__)) cht_w_mes_t;
 
 

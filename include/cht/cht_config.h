@@ -20,10 +20,14 @@
 #define W_QP_ID 3
 
 #define CHT_TRACE_BATCH SESSIONS_PER_THREAD
-#define CHT_PENDING_WRITES (SESSIONS_PER_THREAD + 1)
+#define CHT_PENDING_WRITES (MACHINE_NUM * SESSIONS_PER_THREAD)
 #define CHT_W_ROB_SIZE (CHT_PENDING_WRITES)
-#define CHT_UPDATE_BATCH (CHT_W_ROB_SIZE * MACHINE_NUM)
-#define MAX_INCOMING_PREP (CHT_W_ROB_SIZE * REM_MACH_NUM)
+#define CHT_UPDATE_BATCH (CHT_W_ROB_SIZE)
+#define MAX_INCOMING_PREP (CHT_W_ROB_SIZE)
+
+#define DISABLE_WRITE_STEERING 0
+#define ENABLE_MULTIPLE_LEADERS 0
+#define CHT_LDR_MACHINE 0
 
 #define CHT_PREP_MCAST_QP 0
 #define CHT_COM_MCAST_QP 1
@@ -73,10 +77,12 @@ typedef struct cht_w_rob {
   uint16_t id;
 
   w_state_t w_state;
-  uint8_t m_id;
+  //uint8_t m_id;
+  uint8_t coordin_m_id;
+  uint8_t owner_m_id;
   uint8_t acks_seen;
   uint8_t val_len;
-  bool inv_applied;
+  //bool local;
 
 } cht_w_rob_t;
 
@@ -86,15 +92,15 @@ typedef struct cht_buf_op {
 } cht_buf_op_t;
 
 typedef struct cht_ptrs_to_w {
-  cht_w_rob_t **w_rob;
+  void **writes;
   uint16_t write_num;
 } cht_ptrs_to_w_t;
 
 typedef struct ptrs_to_prep {
-  uint16_t polled_preps;
-  cht_prep_t **ptr_to_ops;
-  cht_prep_mes_t **ptr_to_mes;
-} ptrs_to_prep_t;
+  uint16_t op_num;
+  void **ops;
+  void **ptr_to_mes;
+} cht_ptrs_to_op_t;
 
 // A data structute that keeps track of the outstanding writes
 typedef struct cht_ctx {
@@ -104,8 +110,8 @@ typedef struct cht_ctx {
 
 
 
-  cht_ptrs_to_w_t *ptrs_to_w;
-  ptrs_to_prep_t *ptrs_to_prep;
+  //cht_ptrs_to_w_t *ptrs_to_w;
+  cht_ptrs_to_op_t *ptrs_to_ops;
 
   trace_t *trace;
   uint32_t trace_iter;

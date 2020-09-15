@@ -6,45 +6,11 @@
 #define ODYSSEY_CHT_INLINE_UTIL_H
 
 
-#include <netw_func.h>
-#include "network_context.h"
+
 #include "cht_kvs_util.h"
-#include "cht_debug_util.h"
+#include "cht_reserve_stations.h"
 
-static inline uint8_t get_key_owner(mica_key_t key)
-{
-  return (uint8_t) (key.bkt % MACHINE_NUM);
-}
 
-static inline uint8_t get_fifo_i(context_t *ctx,
-                                 uint8_t rm_id)
-{
-  return rm_id > ctx->m_id ? (uint8_t) (rm_id - 1) : rm_id;
-}
-
-static inline bool filter_remote_writes(context_t *ctx,
-                                        ctx_trace_op_t *op)
-{
-  if (ENABLE_MULTIPLE_LEADERS) {
-    if (DISABLE_WRITE_STEERING) return false;
-
-    uint8_t rm_id = get_key_owner(op->key);
-    if (rm_id == ctx->m_id) return false;
-    else {
-      ctx_insert_mes(ctx, W_QP_ID, (uint32_t) CHT_W_SIZE, 1, false, op, NOT_USED, get_fifo_i(ctx, rm_id));
-    }
-    return true;
-  }
-  else {
-    if (ctx->m_id == CHT_LDR_MACHINE)
-      return false;
-    else {
-      ctx_insert_mes(ctx, W_QP_ID, (uint32_t) CHT_W_SIZE, 1, false, op, NOT_USED, get_fifo_i(ctx, CHT_LDR_MACHINE));
-      return true;
-    }
-
-  }
-}
 
 
 static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
@@ -92,58 +58,7 @@ static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
 ////------------------------------ COMMIT WRITES -----------------------------
 ////---------------------------------------------------------------------------*/
 
-static inline void cht_apply_writes(context_t *ctx)
-{
-  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
-  uint16_t op_num = cht_ctx->ptrs_to_ops->op_num;
 
-  for (int w_i = 0; w_i < op_num; ++w_i) {
-    cht_w_rob_t *w_rob = (cht_w_rob_t *) cht_ctx->ptrs_to_ops->ops[w_i];
-    if (ENABLE_ASSERTIONS) {
-      assert(w_rob->version > 0);
-      assert(w_rob != NULL);
-    }
-    mica_op_t *kv_ptr = w_rob->kv_ptr;
-    lock_seqlock(&kv_ptr->seqlock);
-    {
-      //assert(kv_ptr->m_id == w_rob->m_id);
-      if (ENABLE_ASSERTIONS) assert(kv_ptr->version > 0);
-      if (kv_ptr->version == w_rob->version) {
-        if (ENABLE_ASSERTIONS)
-          assert(kv_ptr->state == CHT_INV);
-        kv_ptr->state = CHT_V;
-      }
-    }
-    unlock_seqlock(&kv_ptr->seqlock);
-  }
-}
-
-
-static inline void cht_complete_local_write(context_t * ctx,
-                                            cht_w_rob_t *w_rob)
-{
-  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
-  uint16_t sess_id = w_rob->sess_id;
-  if (ENABLE_ASSERTIONS) {
-    assert(sess_id < SESSIONS_PER_THREAD);
-    if (!cht_ctx->stalled[sess_id]) {
-      if (DEBUG_WRITES)
-        my_printf(red, "Session not stalled: owner %u/%u \n",
-                  w_rob->owner_m_id, w_rob->sess_id);
-      assert(false);
-    }
-    else {
-      if (DEBUG_WRITES)
-        my_printf(green, "Session is stalled: owner %u/%u \n",
-                  w_rob->owner_m_id, w_rob->sess_id);
-    }
-  }
-  cht_ctx->all_sessions_stalled = false;
-  signal_completion_to_client(sess_id,
-                              cht_ctx->index_to_req_array[sess_id],
-                              ctx->t_id);
-  cht_ctx->stalled[sess_id] = false;
-}
 
 static inline void cht_commit_writes(context_t *ctx)
 {
@@ -197,62 +112,6 @@ static inline void cht_commit_writes(context_t *ctx)
 ////---------------------------------------------------------------------------*/
 
 
-static inline void cht_fill_w_rob(context_t *ctx,
-                                  cht_prep_t *prep,
-                                  cht_w_rob_t *w_rob)
-{
-  if (ENABLE_ASSERTIONS) {
-    assert(w_rob->w_state == SEMIVALID);
-    assert(w_rob->acks_seen == 0);
-  }
-  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
-  w_rob->w_state = VALID;
-  w_rob->sess_id = prep->sess_id;
-  w_rob->l_id = cht_ctx->inserted_w_id[w_rob->coordin_m_id];
-
-  if (DEBUG_WRITES)
-    my_printf(cyan, "W_rob insert sess %u write %lu, w_rob_i %u\n",
-              w_rob->sess_id, w_rob->l_id,
-              cht_ctx->loc_w_rob->push_ptr);
-
-}
-
-static inline void cht_fill_prep_and_w_rob(context_t *ctx,
-                                           cht_prep_t *prep, void *source,
-                                           cht_w_rob_t *w_rob,
-                                           source_t source_flag)
-{
-  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
-  prep->version = w_rob->version;
-  prep->m_id = w_rob->owner_m_id;
-  ctx_trace_op_t *op = (ctx_trace_op_t *) source;
-  cht_write_t *write = (cht_write_t *) source;
-  switch (source_flag) {
-    case NOT_USED:break;
-    case LOCAL_PREP:
-      if (ENABLE_ASSERTIONS) {
-        assert (prep->m_id == ctx->m_id);
-        assert(cht_ctx->stalled[op->session_id]);
-      }
-      prep->key = op->key;
-      memcpy(prep->value, op->value_to_write, (size_t) VALUE_SIZE);
-      prep->sess_id = op->session_id;
-
-      cht_ctx->index_to_req_array[op->session_id] = op->index_to_req_array;
-      break;
-    case REMOTE_WRITE:
-      if (ENABLE_ASSERTIONS) assert (prep->m_id != ctx->m_id);
-      prep->key = write->key;
-      memcpy(prep->value, write->value, (size_t) VALUE_SIZE);
-      prep->sess_id = write->sess_id;
-      break;
-  }
-  cht_fill_w_rob(ctx, prep, w_rob);
-}
-
-
-
-
 static inline void cht_insert_prep_help(context_t *ctx, void* prep_ptr,
                                         void *source, uint32_t source_flag)
 {
@@ -288,8 +147,9 @@ static inline void cht_insert_write_help(context_t *ctx, void *w_ptr,
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
   per_qp_meta_t *qp_meta = &ctx->qp_meta[W_QP_ID];
   ctx_trace_op_t *op = (ctx_trace_op_t *) source;
-  uint8_t rm_id = get_key_owner(op->key);
+  uint8_t rm_id = get_key_owner(ctx, op->key);
   fifo_t *send_fifo = &qp_meta->send_fifo[get_fifo_i(ctx, rm_id)];
+
 
   if (DEBUG_WRITES)
     my_printf(yellow, "Inserting write: owner %u/%u, to rm: %u in fifo %u \n",
@@ -318,11 +178,7 @@ static inline void cht_insert_write_help(context_t *ctx, void *w_ptr,
 static inline void cht_send_preps_helper(context_t *ctx)
 {
   cht_checks_and_stats_on_bcasting_preps(ctx);
-  //printf("Before: Write posted receives %u \n",
-  // ctx->qp_meta[W_QP_ID].recv_info->posted_recvs);
   ctx_refill_recvs(ctx, W_QP_ID);
-  //printf("After: Write posted receives %u \n",
-  // ctx->qp_meta[W_QP_ID].recv_info->posted_recvs);
 }
 
 static inline void cht_send_acks_helper(context_t *ctx)
@@ -444,7 +300,6 @@ static inline bool cht_ack_handler(context_t *ctx)
   uint64_t l_id = ack->l_id;
   uint64_t pull_lid = cht_ctx->committed_w_id[ctx->m_id]; // l_id at the pull pointer
   uint32_t ack_ptr; // a pointer in the FIFO, from where ack should be added
-  //cht_check_polled_ack_and_print(ack, ack_num, pull_lid, recv_fifo->pull_ptr, ctx->t_id);
 
   ctx_increase_credits_on_polling_ack(ctx, ACK_QP_ID, ack);
 
@@ -456,13 +311,11 @@ static inline bool cht_ack_handler(context_t *ctx)
       (pull_lid >= l_id && (pull_lid - l_id) >= ack_num))
     return true;
 
-  //cht_check_ack_l_id_is_small_enough(ctx, ack);
-  ack_ptr = ctx_find_when_the_ack_points_acked(ack, cht_ctx->loc_w_rob, 
+  ack_ptr = ctx_find_when_the_ack_points_acked(ack, cht_ctx->loc_w_rob,
                                                pull_lid, &ack_num);
 
   // Apply the acks that refer to stored writes
   cht_apply_acks(ctx, ack, ack_num, ack_ptr);
-  //cht_insert_commits_on_receiving_ack(ctx);
 
   return true;
 }

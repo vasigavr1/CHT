@@ -125,9 +125,9 @@ static inline void cht_check_when_applying_acks(context_t *ctx,
     uint64_t pull_lid = cht_ctx->committed_w_id[ctx->m_id];
     if (ENABLE_ASSERTIONS && (ack_ptr == cht_ctx->loc_w_rob->push_ptr)) {
       uint32_t origin_ack_ptr = (uint32_t) (ack_ptr - ack_i + CHT_PENDING_WRITES) % CHT_PENDING_WRITES;
-      my_printf(red, "Origin ack_ptr %u/%u, acks %u/%u, w_pull_ptr %u, w_push_ptr % u, capacity %u \n",
-                origin_ack_ptr, (cht_ctx->loc_w_rob->pull_ptr + (ack->l_id - pull_lid)) % CHT_PENDING_WRITES,
-                ack_i, ack_num, cht_ctx->loc_w_rob->pull_ptr, cht_ctx->loc_w_rob->push_ptr, cht_ctx->loc_w_rob->capacity);
+      //my_printf(red, "Origin ack_ptr %u/%u, acks %u/%u, w_pull_ptr %u, w_push_ptr % u, capacity %u \n",
+      //          origin_ack_ptr, (cht_ctx->loc_w_rob->pull_ptr + (ack->l_id - pull_lid)) % CHT_PENDING_WRITES,
+      //          ack_i, ack_num, cht_ctx->loc_w_rob->pull_ptr, cht_ctx->loc_w_rob->push_ptr, cht_ctx->loc_w_rob->capacity);
     }
 
     assert((w_rob->l_id % cht_ctx->w_rob->max_size) == ack_ptr);

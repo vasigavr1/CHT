@@ -25,9 +25,12 @@
 #define CHT_UPDATE_BATCH (CHT_W_ROB_SIZE)
 #define MAX_INCOMING_PREP (CHT_W_ROB_SIZE)
 
-#define DISABLE_WRITE_STEERING 0
-#define ENABLE_MULTIPLE_LEADERS 0
+
+#define ENABLE_MULTIPLE_LEADERS 1
 #define CHT_LDR_MACHINE 0
+#define DISABLE_WRITE_STEERING (ENABLE_MULTIPLE_LEADERS ? 0 : 0)
+#define SEE_STEERING_PERCENTAGES 1
+
 
 #define CHT_PREP_MCAST_QP 0
 #define CHT_COM_MCAST_QP 1
@@ -138,6 +141,8 @@ typedef struct thread_stats { // 2 cache lines
   long long cache_hits_per_thread;
   long long remotes_per_client;
   long long locals_per_client;
+
+  uint64_t steered_writes[MACHINE_NUM];
 
   long long preps_sent;
   long long acks_sent;

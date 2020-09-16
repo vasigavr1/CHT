@@ -55,6 +55,7 @@ static inline bool filter_remote_writes(context_t *ctx,
                                         ctx_trace_op_t *op)
 {
   if (DISABLE_WRITE_STEERING) return false;
+  if (op->opcode != KVS_OP_PUT) return false;
 
   uint8_t rm_id = get_key_owner(ctx, op->key);
   if (rm_id == ctx->m_id) return false;

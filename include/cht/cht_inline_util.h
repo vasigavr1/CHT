@@ -398,7 +398,12 @@ static inline void cht_main_loop(context_t *ctx)
 
     cht_batch_from_trace_to_KVS(ctx);
 
+    ctx_send_unicasts(ctx, W_QP_ID);
+
+    ctx_poll_incoming_messages(ctx, W_QP_ID);
+
     ctx_send_broadcasts(ctx, PREP_QP_ID);
+
 
     ctx_poll_incoming_messages(ctx, PREP_QP_ID);
 
@@ -406,16 +411,11 @@ static inline void cht_main_loop(context_t *ctx)
 
     ctx_poll_incoming_messages(ctx, ACK_QP_ID);
 
+    ctx_poll_incoming_messages(ctx, COM_QP_ID);
+
     cht_commit_writes(ctx);
 
     ctx_send_broadcasts(ctx, COM_QP_ID);
-
-    ctx_poll_incoming_messages(ctx, COM_QP_ID);
-    
-    ctx_send_unicasts(ctx, W_QP_ID);
-
-    ctx_poll_incoming_messages(ctx, W_QP_ID);
-
   }
 }
 

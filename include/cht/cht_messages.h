@@ -8,9 +8,10 @@
 #include "top.h"
 
 /// PREP_QP_ID
-#define PREP_CREDITS 5
+#define PREP_CREDITS 10
 #define PREP_COALESCE 16
 #define COM_CREDITS 80
+#define CHT_W_COALESCE 16
 //#define MAX_PREP_SIZE 500
 
 #define MAX_PREP_WRS (MESSAGES_IN_BCAST_BATCH)
@@ -61,7 +62,7 @@ typedef struct cht_prep_message_ud_req {
 #define MAX_LIDS_IN_A_COMMIT SESSIONS_PER_THREAD
 
 
-#define CHT_W_COALESCE 5
+
 #define CHT_MAX_W_WRS (MACHINE_NUM + (SESSIONS_PER_THREAD / CHT_W_COALESCE))
 #define CHT_MAX_RECV_W_WRS ( REM_MACH_NUM * SESSIONS_PER_THREAD)
 #define CHT_BUF_SLOTS  CHT_MAX_RECV_W_WRS

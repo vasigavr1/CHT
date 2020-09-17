@@ -242,9 +242,11 @@ static inline bool cht_prepare_handler(context_t *ctx)
 
   uint8_t coalesce_num = prep_mes->coalesce_num;
 
+  /// We allow one prepare per session per machine to ensure
+  /// we dont get overflooded with writes
   fifo_t *w_rob_fifo = &cht_ctx->w_rob[prep_mes->m_id];
   bool preps_fit_in_w_rob =
-    w_rob_fifo->capacity + coalesce_num <= SESSIONS_PER_THREAD; //w_rob_fifo->max_size;
+    w_rob_fifo->capacity + coalesce_num <= SESSIONS_PER_THREAD;
 
   if (!preps_fit_in_w_rob) return false;
   fifo_increase_capacity(w_rob_fifo, coalesce_num);

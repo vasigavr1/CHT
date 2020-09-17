@@ -18,8 +18,6 @@ static void cht_static_assert_compile_parameters()
 {
 
   emphatic_print(green, "CHT");
-  //static_assert(PREP_SIZE == sizeof(cht_prep_t));
-  //static_assert(PREP_SEND_SIZE == sizeof(cht_prep_mes_t));
 }
 
 static void cht_init_globals()

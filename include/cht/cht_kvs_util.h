@@ -31,9 +31,7 @@ static inline void cht_insert_buffered_op(context_t *ctx,
   buf_op->op.session_id = op->session_id;
   buf_op->op.index_to_req_array = op->index_to_req_array;
   buf_op->kv_ptr = kv_ptr;
-
   buf_op->op.value_to_read = op->value_to_read;
-
 
   fifo_incr_push_ptr(cht_ctx->buf_reads);
   fifo_increm_capacity(cht_ctx->buf_reads);
@@ -151,10 +149,6 @@ static inline void cht_loc_or_rem_write(context_t *ctx,
   w_rob->owner_m_id = m_id;
   w_rob->kv_ptr = kv_ptr;
   w_rob->w_state = SEMIVALID;
-
-  //if (DEBUG_PREPARES)
-
-
   ctx_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1, false, source, source_flag, 0);
 }
 

@@ -27,7 +27,7 @@
 #define PREP_SEND_SIZE (PREP_MES_HEADER + (PREP_COALESCE * PREP_SIZE))
 #define PREP_RECV_SIZE (GRH_SIZE + PREP_SEND_SIZE)
 
-#define PREP_FIFO_SIZE (SESSIONS_PER_THREAD + 1)
+
 
 
 typedef struct cht_prepare {

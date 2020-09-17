@@ -64,7 +64,6 @@ static inline bool filter_remote_writes(context_t *ctx,
                    op, NOT_USED, get_fifo_i(ctx, rm_id));
   }
   return true;
-
 }
 
 

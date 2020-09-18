@@ -13,7 +13,7 @@
 
 
 
-static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
+static inline uint16_t cht_find_trace_ops(context_t *ctx)
 {
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
   ctx_trace_op_t *ops = cht_ctx->ops;
@@ -24,9 +24,9 @@ static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
 
   if (all_sessions_are_stalled(ctx, cht_ctx->all_sessions_stalled,
                                &cht_ctx->stalled_sessions_dbg_counter))
-    return;
+    return 0;
   if (!find_starting_session(ctx, cht_ctx->last_session,
-                             cht_ctx->stalled, &working_session)) return;
+                             cht_ctx->stalled, &working_session)) return 0;
 
   bool passed_over_all_sessions = false;
 
@@ -51,7 +51,15 @@ static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
   }
   cht_ctx->last_session = (uint16_t) working_session;
   t_stats[ctx->t_id].cache_hits_per_thread += op_num;
-  if (kvs_op_i > 0) cht_KVS_batch_op_trace(ctx, kvs_op_i);
+  return kvs_op_i;
+}
+
+static inline void cht_batch_from_trace_to_KVS(context_t *ctx)
+{
+  cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
+  uint16_t kvs_op_i = cht_find_trace_ops(ctx);
+  if (kvs_op_i > 0 || cht_ctx->buf_reads->capacity > 0)
+    cht_KVS_batch_op_trace(ctx, kvs_op_i);
 }
 
 ///* ---------------------------------------------------------------------------

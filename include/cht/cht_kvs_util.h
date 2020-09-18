@@ -164,7 +164,8 @@ static inline void cht_KVS_batch_op_trace(context_t *ctx, uint16_t op_num)
   uint16_t op_i;
   if (ENABLE_ASSERTIONS) {
     assert(op != NULL);
-    assert(op_num > 0 && op_num <= CHT_TRACE_BATCH);
+    assert(op_num <= CHT_TRACE_BATCH);
+    assert(op_num > 0 || cht_ctx->buf_reads->capacity > 0);
   }
 
   unsigned int bkt[CHT_TRACE_BATCH];

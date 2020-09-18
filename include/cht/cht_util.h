@@ -120,9 +120,9 @@ static void cht_init_qp_meta(context_t *ctx)
                      "send preps", "recv preps");
 //
 //
-  crate_ack_qp_meta(&qp_meta[ACK_QP_ID],
-                    PREP_QP_ID, REM_MACH_NUM,
-                    REM_MACH_NUM, PREP_CREDITS);
+  create_ack_qp_meta(&qp_meta[ACK_QP_ID],
+                     PREP_QP_ID, REM_MACH_NUM,
+                     REM_MACH_NUM, PREP_CREDITS);
 //
   create_per_qp_meta(&qp_meta[COM_QP_ID], COM_WRS,
                      RECV_COM_WRS, SEND_BCAST_RECV_BCAST, RECV_SEC_ROUND,

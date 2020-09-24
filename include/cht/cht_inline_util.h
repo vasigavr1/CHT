@@ -252,6 +252,8 @@ static inline bool cht_prepare_handler(context_t *ctx)
 
 
   fifo_t *w_rob_fifo = &cht_ctx->w_rob[prep_mes->m_id];
+
+
   bool w_rob_has_preps = w_rob_fifo->capacity > 0;
   bool preps_fit_in_w_rob =
     w_rob_fifo->capacity + coalesce_num <= CHT_W_ROB_SIZE;
@@ -259,6 +261,8 @@ static inline bool cht_prepare_handler(context_t *ctx)
     w_rob_fifo->capacity + coalesce_num <= OPTIMAL_PREP_POLL_NUM;
   if (!preps_fit_in_w_rob) return false;
   if (w_rob_has_preps && !within_optimal_size) return false;
+
+
   fifo_increase_capacity(w_rob_fifo, coalesce_num);
 
   cht_check_polled_prep_and_print(ctx, prep_mes);
@@ -415,7 +419,6 @@ static inline void cht_main_loop(context_t *ctx)
     ctx_poll_incoming_messages(ctx, W_QP_ID);
 
     ctx_send_broadcasts(ctx, PREP_QP_ID);
-
 
     ctx_poll_incoming_messages(ctx, PREP_QP_ID);
 

@@ -75,9 +75,9 @@ static inline void init_w_rob_on_rem_prep(context_t *ctx,
 ////---------------------------------------------------------------------------*/
 
 static inline void cht_rem_prep(context_t *ctx,
-                              mica_op_t *kv_ptr,
-                              cht_prep_mes_t *prep_mes,
-                              cht_prep_t *prep)
+                                mica_op_t *kv_ptr,
+                                cht_prep_mes_t *prep_mes,
+                                cht_prep_t *prep)
 {
 
   

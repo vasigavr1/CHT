@@ -76,10 +76,13 @@ static inline void cht_apply_writes(context_t *ctx)
 
   for (int w_i = 0; w_i < op_num; ++w_i) {
     cht_w_rob_t *w_rob = (cht_w_rob_t *) cht_ctx->ptrs_to_ops->ops[w_i];
+    assert(w_rob->w_state == INVALID);
     if (ENABLE_ASSERTIONS) {
       assert(w_rob->version > 0);
       assert(w_rob != NULL);
+      assert(w_rob->kv_ptr != NULL);
     }
+    w_rob->w_state = INVALID;
     mica_op_t *kv_ptr = w_rob->kv_ptr;
     lock_seqlock(&kv_ptr->seqlock);
     {

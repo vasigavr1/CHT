@@ -75,7 +75,7 @@ static inline void cht_commit_writes(context_t *ctx)
   cht_w_rob_t **ptrs_to_w_rob = (cht_w_rob_t **) cht_ctx->ptrs_to_ops->ops;
   for (int m_i = 0; m_i < MACHINE_NUM; ++m_i) {
     cht_w_rob_t *w_rob = (cht_w_rob_t *) get_fifo_pull_slot(&cht_ctx->w_rob[m_i]);
-    while (w_rob->w_state == READY) {
+    while (w_rob->w_state == READY && write_num < CHT_UPDATE_BATCH) {
 
       w_rob->w_state = INVALID;
       if (ENABLE_ASSERTIONS) {
@@ -250,13 +250,15 @@ static inline bool cht_prepare_handler(context_t *ctx)
 
   uint8_t coalesce_num = prep_mes->coalesce_num;
 
-  /// We allow one prepare per session per machine to ensure
-  /// we dont get overflooded with writes
-  fifo_t *w_rob_fifo = &cht_ctx->w_rob[prep_mes->m_id];
-  bool preps_fit_in_w_rob =
-    w_rob_fifo->capacity + coalesce_num <= SESSIONS_PER_THREAD;
 
+  fifo_t *w_rob_fifo = &cht_ctx->w_rob[prep_mes->m_id];
+  bool w_rob_has_preps = w_rob_fifo->capacity > 0;
+  bool preps_fit_in_w_rob =
+    w_rob_fifo->capacity + coalesce_num <= CHT_W_ROB_SIZE;
+  bool within_optimal_size =
+    w_rob_fifo->capacity + coalesce_num <= OPTIMAL_PREP_POLL_NUM;
   if (!preps_fit_in_w_rob) return false;
+  if (w_rob_has_preps && !within_optimal_size) return false;
   fifo_increase_capacity(w_rob_fifo, coalesce_num);
 
   cht_check_polled_prep_and_print(ctx, prep_mes);
@@ -367,8 +369,8 @@ static inline bool cht_write_handler(context_t *ctx)
   if (DEBUG_WRITES) printf("Wrkr %u sees a write Opcode %d at offset %d  \n",
                            ctx->t_id, w_mes->opcode, recv_fifo->pull_ptr);
 
-  uint8_t w_num = w_mes->coalesce_num;
-  if (cht_ctx->w_rob->capacity + w_num > CHT_PENDING_WRITES) {
+   uint8_t w_num = w_mes->coalesce_num;
+  if (cht_ctx->loc_w_rob->capacity + w_num > CHT_W_ROB_SIZE) {
     return false;
   }
 

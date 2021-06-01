@@ -5,9 +5,9 @@
 #ifndef ODYSSEY_CHT_RESERVE_STATIONS_H
 #define ODYSSEY_CHT_RESERVE_STATIONS_H
 
-#include <netw_func.h>
+#include <od_netw_func.h>
 #include "cht_debug_util.h"
-#include "network_context.h"
+#include "od_network_context.h"
 
 static inline void see_steering_percentages(context_t *ctx,
                                             mica_key_t key)

@@ -5,7 +5,7 @@
 #ifndef ODYSSEY_CHT_MESSAGES_H
 #define ODYSSEY_CHT_MESSAGES_H
 
-#include "top.h"
+#include "od_top.h"
 
 /// PREP_QP_ID
 #define PREP_CREDITS 10

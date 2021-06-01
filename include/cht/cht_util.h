@@ -6,10 +6,10 @@
 #define ODYSSEY_CHT_UTIL_H
 
 #include "cht_config.h"
-#include "network_context.h"
-#include "init_func.h"
+#include "od_network_context.h"
+#include "od_init_func.h"
 #include <cht_inline_util.h>
-#include "../../../odlib/include/trace/trace_util.h"
+#include "../../../odlib/include/trace/od_trace_util.h"
 
 
 void cht_stats(stats_ctx_t *ctx);

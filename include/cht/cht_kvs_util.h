@@ -6,9 +6,9 @@
 #define ODYSSEY_CHT_KVS_UTIL_H
 
 
-#include <network_context.h>
-#include <netw_func.h>
-#include "kvs.h"
+#include <od_network_context.h>
+#include <od_netw_func.h>
+#include "od_kvs.h"
 #include "cht_config.h"
 
 static inline void check_opcode_is_read(ctx_trace_op_t *op, 

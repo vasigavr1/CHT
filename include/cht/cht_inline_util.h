@@ -33,13 +33,13 @@ static inline uint16_t cht_find_trace_ops(context_t *ctx)
   /// main loop
   while (kvs_op_i < CHT_TRACE_BATCH && !passed_over_all_sessions) {
 
-    ctx_fill_trace_op(ctx, &trace[cht_ctx->trace_iter], &ops[kvs_op_i], working_session);
+    od_fill_trace_op(ctx, &trace[cht_ctx->trace_iter], &ops[kvs_op_i], working_session);
     cht_ctx->stalled[working_session] = true;
     passed_over_all_sessions =
-      ctx_find_next_working_session(ctx, &working_session,
-                                    cht_ctx->stalled,
-                                    cht_ctx->last_session,
-                                    &cht_ctx->all_sessions_stalled);
+        od_find_next_working_session(ctx, &working_session,
+                                     cht_ctx->stalled,
+                                     cht_ctx->last_session,
+                                     &cht_ctx->all_sessions_stalled);
     if (!ENABLE_CLIENTS) {
       cht_ctx->trace_iter++;
       if (trace[cht_ctx->trace_iter].opcode == NOP) cht_ctx->trace_iter = 0;
@@ -390,7 +390,7 @@ static inline bool cht_write_handler(context_t *ctx)
     ptrs_to_prep->ptr_to_mes[ptrs_to_prep->op_num] = w_mes;
     ptrs_to_prep->op_num++;
 
-    //ctx_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1,
+    //od_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1,
     //               false, (void *) write, REMOTE_WRITE, 0);
   }
   if (ENABLE_STAT_COUNTING) {
@@ -422,7 +422,7 @@ static inline void cht_main_loop(context_t *ctx)
 
     ctx_poll_incoming_messages(ctx, PREP_QP_ID);
 
-    ctx_send_acks(ctx, ACK_QP_ID);
+    od_send_acks(ctx, ACK_QP_ID);
 
     ctx_poll_incoming_messages(ctx, ACK_QP_ID);
 

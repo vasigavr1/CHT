@@ -60,8 +60,8 @@ static inline bool filter_remote_writes(context_t *ctx,
   uint8_t rm_id = get_key_owner(ctx, op->key);
   if (rm_id == ctx->m_id) return false;
   else {
-    ctx_insert_mes(ctx, W_QP_ID, (uint32_t) CHT_W_SIZE, 1, false,
-                   op, NOT_USED, get_fifo_i(ctx, rm_id));
+    od_insert_mes(ctx, W_QP_ID, (uint32_t) CHT_W_SIZE, 1, false,
+                  op, NOT_USED, get_fifo_i(ctx, rm_id));
   }
   return true;
 }

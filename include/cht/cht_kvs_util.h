@@ -149,7 +149,7 @@ static inline void cht_loc_or_rem_write(context_t *ctx,
   w_rob->owner_m_id = m_id;
   w_rob->kv_ptr = kv_ptr;
   w_rob->w_state = SEMIVALID;
-  ctx_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1, false, source, source_flag, 0);
+  od_insert_mes(ctx, PREP_QP_ID, (uint32_t) PREP_SIZE, 1, false, source, source_flag, 0);
 }
 
 
@@ -191,7 +191,7 @@ static inline void cht_KVS_batch_op_trace(context_t *ctx, uint16_t op_num)
 
 
   for(op_i = 0; op_i < op_num; op_i++) {
-    KVS_check_key(kv_ptr[op_i], op[op_i].key, op_i);
+    od_KVS_check_key(kv_ptr[op_i], op[op_i].key, op_i);
 
     if (op[op_i].opcode == KVS_OP_PUT) {
       cht_loc_or_rem_write(ctx, kv_ptr[op_i], &op[op_i], LOCAL_PREP, ctx->m_id);
@@ -231,7 +231,7 @@ static inline void cht_KVS_batch_op_preps(context_t *ctx)
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
   for(op_i = 0; op_i < op_num; op_i++) {
-    KVS_check_key(kv_ptr[op_i], preps[op_i]->key, op_i);
+    od_KVS_check_key(kv_ptr[op_i], preps[op_i]->key, op_i);
     cht_rem_prep(ctx, kv_ptr[op_i], prep_mes[op_i], preps[op_i]);
   }
 }
@@ -262,7 +262,7 @@ static inline void cht_KVS_batch_op_writes(context_t *ctx)
   KVS_locate_all_kv_pairs(op_num, tag, bkt_ptr, kv_ptr, KVS);
 
   for(op_i = 0; op_i < op_num; op_i++) {
-    KVS_check_key(kv_ptr[op_i], writes[op_i]->key, op_i);
+    od_KVS_check_key(kv_ptr[op_i], writes[op_i]->key, op_i);
     cht_loc_or_rem_write(ctx, kv_ptr[op_i], (void *) writes[op_i],
                          REMOTE_WRITE, w_mes[op_i]->m_id);
   }

@@ -28,11 +28,11 @@ static void cht_init_globals()
 
 static void cht_init_functionality(int argc, char *argv[])
 {
-  generic_static_assert_compile_parameters();
+  od_generic_static_assert_compile_parameters();
   cht_static_assert_compile_parameters();
-  generic_init_globals(QP_NUM);
+  od_generic_init_globals(QP_NUM);
   cht_init_globals();
-  handle_program_inputs(argc, argv);
+  od_handle_program_inputs(argc, argv);
 }
 
 

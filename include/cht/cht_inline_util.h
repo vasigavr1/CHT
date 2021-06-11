@@ -365,7 +365,7 @@ static inline bool cht_commit_handler(context_t *ctx)
 static inline bool cht_write_handler(context_t *ctx)
 {
   cht_ctx_t *cht_ctx = (cht_ctx_t *) ctx->appl_ctx;
-  if (ENABLE_ASSERTIONS) assert(cht_ctx->w_rob->capacity < CHT_PENDING_WRITES);
+  if (ENABLE_ASSERTIONS) assert(cht_ctx->w_rob->capacity <= CHT_PENDING_WRITES);
   per_qp_meta_t *qp_meta = &ctx->qp_meta[W_QP_ID];
   fifo_t *recv_fifo = qp_meta->recv_fifo;
   volatile cht_w_mes_ud_t *incoming_ws = (volatile cht_w_mes_ud_t *) qp_meta->recv_fifo->fifo;

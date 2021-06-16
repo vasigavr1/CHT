@@ -50,7 +50,7 @@ static inline uint16_t cht_find_trace_ops(context_t *ctx)
     op_num++;
   }
   cht_ctx->last_session = (uint16_t) working_session;
-  t_stats[ctx->t_id].cache_hits_per_thread += op_num;
+  t_stats[ctx->t_id].total_reqs += op_num;
   return kvs_op_i;
 }
 
